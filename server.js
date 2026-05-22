@@ -228,11 +228,16 @@ app.post('/api/pipeline', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
 
-  const { rows: existing } = await pool.query('SELECT id FROM articles WHERE url=$1', [url]);
-  if (existing[0]) return res.status(409).json({ error: 'Article already saved', id: existing[0].id });
+  const { rows: existing } = await pool.query('SELECT id, ai_processed FROM articles WHERE url=$1', [url]);
+  if (existing[0]) {
+    if (existing[0].ai_processed) {
+      return res.status(409).json({ error: 'Article already saved', id: existing[0].id });
+    }
+    // Incomplete row from a prior failed attempt — drop it and re-process.
+    await pool.query('DELETE FROM articles WHERE id=$1', [existing[0].id]);
+  }
 
   const id = crypto.randomUUID();
-  let articleSaved = false;
 
   try {
     let extractResult;
@@ -250,7 +255,6 @@ app.post('/api/pipeline', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)`,
       [id, url, title, content, siteName, byline, wordCount, Date.now()]
     );
-    articleSaved = true;
 
     const lang = detectLanguage(content);
     const isVi = lang === 'Vietnamese';
@@ -326,7 +330,7 @@ ${content.slice(0, 12000)}`;
       ai: { summary: parsed.summary, tags: parsed.tags, category: parsed.category }
     });
   } catch (e) {
-    if (!articleSaved) await pool.query('DELETE FROM articles WHERE id=$1', [id]);
+    await pool.query('DELETE FROM articles WHERE id=$1', [id]);
     res.status(500).json({ error: e.message });
   }
 });
