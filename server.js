@@ -6,16 +6,14 @@ const { Readability } = require('@mozilla/readability');
 const Database = require('better-sqlite3');
 const { spawn } = require('child_process');
 const MiniSearch = require('minisearch');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
 const PYTHON = process.env.PYTHON_PATH || 'python3';
 const TRAFILATURA_SCRIPT = path.join(__dirname, 'trafilatura_extract.py');
 
 const app = express();
 const PORT = process.env.PORT || 3777;
 
-const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const AI_MODEL = 'qwen/qwen-2.5-72b-instruct';
 
 // ─── SQLite init ──────────────────────────────────────────────────────────────
 const db = new Database(path.join(__dirname, 'inkwell.db'));
@@ -143,7 +141,7 @@ app.use((req, res, next) => {
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 app.get('/api/models', (_, res) => {
-  res.json([{ name: GEMINI_MODEL, family: 'gemini' }]);
+  res.json([{ name: AI_MODEL, family: 'openrouter' }]);
 });
 
 // ─── Full pipeline: extract → Gemini → SQLite ─────────────────────────────────
@@ -207,12 +205,21 @@ Return this exact JSON structure:
 }
 Rules: tags 3-5 items · category MUST match listed values · no text outside JSON`;
 
-    const model = genai.getGenerativeModel({
-      model: GEMINI_MODEL,
-      generationConfig: { temperature: 0.0, responseMimeType: 'application/json' }
+    const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        temperature: 0.0,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: prompt }],
+      }),
     });
-    const result = await model.generateContent(prompt);
-    const parsed = parseJsonOutput(result.response.text());
+    const aiJson = await aiRes.json();
+    const parsed = parseJsonOutput(aiJson.choices[0].message.content);
 
     db.prepare(`UPDATE articles SET summary=?,tags=?,category=?,ai_processed=1 WHERE id=?`)
       .run(parsed.summary, JSON.stringify(parsed.tags), parsed.category, id);
