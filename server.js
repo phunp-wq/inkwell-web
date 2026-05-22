@@ -3,7 +3,7 @@ const path = require('path');
 const { existsSync } = require('fs');
 const { JSDOM } = require('jsdom');
 const { Readability } = require('@mozilla/readability');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const { spawn } = require('child_process');
 const MiniSearch = require('minisearch');
 const PYTHON = process.env.PYTHON_PATH || 'python3';
@@ -15,30 +15,32 @@ const PORT = process.env.PORT || 3777;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const AI_MODEL = 'openai/gpt-oss-120b:free';
 
-// ─── SQLite init ──────────────────────────────────────────────────────────────
-// DATA_DIR is set to a Railway persistent volume mount path (e.g. /data).
-// Falls back to __dirname for local dev.
-const DATA_DIR = process.env.DATA_DIR || __dirname;
-const db = new Database(path.join(DATA_DIR, 'inkwell.db'));
-db.exec(`CREATE TABLE IF NOT EXISTS articles (
-  id          TEXT PRIMARY KEY,
-  url         TEXT NOT NULL,
-  title       TEXT NOT NULL,
-  content     TEXT NOT NULL,
-  summary     TEXT,
-  tags        TEXT,
-  category    TEXT,
-  site_name   TEXT,
-  byline      TEXT,
-  word_count  INTEGER,
-  saved_at    INTEGER NOT NULL,
-  ai_processed INTEGER DEFAULT 0
-)`);
+// ─── PostgreSQL init ──────────────────────────────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+});
 
-db.exec(`CREATE TABLE IF NOT EXISTS favorites (
-  article_id TEXT PRIMARY KEY,
-  saved_at   INTEGER NOT NULL
-)`);
+async function initDb() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS articles (
+    id          TEXT PRIMARY KEY,
+    url         TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    summary     TEXT,
+    tags        TEXT,
+    category    TEXT,
+    site_name   TEXT,
+    byline      TEXT,
+    word_count  INTEGER,
+    saved_at    BIGINT NOT NULL,
+    ai_processed INTEGER DEFAULT 0
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS favorites (
+    article_id TEXT PRIMARY KEY,
+    saved_at   BIGINT NOT NULL
+  )`);
+}
 
 function safeJson(str, fallback) {
   try { return JSON.parse(str); } catch (_) { return fallback; }
@@ -126,12 +128,13 @@ const miniSearch = new MiniSearch({
   searchOptions: { prefix: true, fuzzy: 0.2, boost: { title: 3, summary: 2, tags: 2 } }
 });
 
-function rebuildIndex() {
-  const rows = db.prepare('SELECT id,url,title,summary,content,tags,site_name,word_count,category FROM articles WHERE ai_processed=1').all();
+async function rebuildIndex() {
+  const { rows } = await pool.query(
+    'SELECT id,url,title,summary,content,tags,site_name,word_count,category FROM articles WHERE ai_processed=1'
+  );
   if (miniSearch.documentCount > 0) miniSearch.removeAll();
   rows.forEach(r => miniSearch.add({ ...r, tags: safeJson(r.tags, []).join(' ') }));
 }
-rebuildIndex();
 
 app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
@@ -147,13 +150,13 @@ app.get('/api/models', (_, res) => {
   res.json([{ name: AI_MODEL, family: 'openrouter' }]);
 });
 
-// ─── Full pipeline: extract → Gemini → SQLite ─────────────────────────────────
+// ─── Full pipeline: extract → AI → PostgreSQL ────────────────────────────────
 app.post('/api/pipeline', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
 
-  const existing = db.prepare('SELECT id FROM articles WHERE url=?').get(url);
-  if (existing) return res.status(409).json({ error: 'Article already saved', id: existing.id });
+  const { rows: existing } = await pool.query('SELECT id FROM articles WHERE url=$1', [url]);
+  if (existing[0]) return res.status(409).json({ error: 'Article already saved', id: existing[0].id });
 
   const id = crypto.randomUUID();
   let articleSaved = false;
@@ -162,9 +165,11 @@ app.post('/api/pipeline', async (req, res) => {
     const html = await fetchHtml(url);
     const { content, title, siteName, byline, wordCount } = await extractContent(html, url);
 
-    db.prepare(`INSERT INTO articles (id,url,title,content,site_name,byline,word_count,saved_at,ai_processed)
-                VALUES (?,?,?,?,?,?,?,?,0)`)
-      .run(id, url, title, content, siteName, byline, wordCount, Date.now());
+    await pool.query(
+      `INSERT INTO articles (id,url,title,content,site_name,byline,word_count,saved_at,ai_processed)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)`,
+      [id, url, title, content, siteName, byline, wordCount, Date.now()]
+    );
     articleSaved = true;
 
     const lang = detectLanguage(content);
@@ -228,23 +233,25 @@ ${content.slice(0, 12000)}`;
     if (!aiJson.choices?.[0]) throw new Error(`OpenRouter error: ${JSON.stringify(aiJson)}`);
     const parsed = parseJsonOutput(aiJson.choices[0].message.content);
 
-    db.prepare(`UPDATE articles SET summary=?,tags=?,category=?,ai_processed=1 WHERE id=?`)
-      .run(parsed.summary, JSON.stringify(parsed.tags), parsed.category, id);
+    await pool.query(
+      `UPDATE articles SET summary=$1,tags=$2,category=$3,ai_processed=1 WHERE id=$4`,
+      [parsed.summary, JSON.stringify(parsed.tags), parsed.category, id]
+    );
 
-    rebuildIndex();
+    await rebuildIndex();
 
     res.json({
       id, url, title, siteName, wordCount, lang,
       ai: { summary: parsed.summary, tags: parsed.tags, category: parsed.category }
     });
   } catch (e) {
-    if (!articleSaved) db.prepare('DELETE FROM articles WHERE id=?').run(id);
+    if (!articleSaved) await pool.query('DELETE FROM articles WHERE id=$1', [id]);
     res.status(500).json({ error: e.message });
   }
 });
 
 // ─── List / search articles ───────────────────────────────────────────────────
-app.get('/api/articles', (req, res) => {
+app.get('/api/articles', async (req, res) => {
   const { q, category, tag } = req.query;
 
   let ids = null;
@@ -254,8 +261,11 @@ app.get('/api/articles', (req, res) => {
     if (ids.size === 0) return res.json([]);
   }
 
-  const rows = db.prepare('SELECT id,url,title,summary,tags,category,site_name,word_count,saved_at,ai_processed FROM articles ORDER BY saved_at DESC').all();
-  const favIds = new Set(db.prepare('SELECT article_id FROM favorites').all().map(r => r.article_id));
+  const { rows } = await pool.query(
+    'SELECT id,url,title,summary,tags,category,site_name,word_count,saved_at,ai_processed FROM articles ORDER BY saved_at DESC'
+  );
+  const { rows: favRows } = await pool.query('SELECT article_id FROM favorites');
+  const favIds = new Set(favRows.map(r => r.article_id));
 
   let filtered = rows.map(r => ({ ...r, tags: safeJson(r.tags, []), favorite: favIds.has(r.id) }));
   if (ids) filtered = filtered.filter(r => ids.has(r.id));
@@ -266,30 +276,31 @@ app.get('/api/articles', (req, res) => {
 });
 
 // ─── Get single article (with full content) ───────────────────────────────────
-app.get('/api/articles/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM articles WHERE id=?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Not found' });
-  const fav = db.prepare('SELECT 1 FROM favorites WHERE article_id=?').get(row.id);
-  res.json({ ...row, tags: JSON.parse(row.tags || '[]'), favorite: !!fav });
+app.get('/api/articles/:id', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM articles WHERE id=$1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  const row = rows[0];
+  const { rows: favRows } = await pool.query('SELECT 1 FROM favorites WHERE article_id=$1', [row.id]);
+  res.json({ ...row, tags: safeJson(row.tags, []), favorite: favRows.length > 0 });
 });
 
 // ─── Delete article ───────────────────────────────────────────────────────────
-app.delete('/api/articles/:id', (req, res) => {
-  db.prepare('DELETE FROM articles WHERE id=?').run(req.params.id);
-  db.prepare('DELETE FROM favorites WHERE article_id=?').run(req.params.id);
-  rebuildIndex();
+app.delete('/api/articles/:id', async (req, res) => {
+  await pool.query('DELETE FROM articles WHERE id=$1', [req.params.id]);
+  await pool.query('DELETE FROM favorites WHERE article_id=$1', [req.params.id]);
+  await rebuildIndex();
   res.json({ ok: true });
 });
 
 // ─── Toggle favorite ──────────────────────────────────────────────────────────
-app.post('/api/articles/:id/favorite', (req, res) => {
+app.post('/api/articles/:id/favorite', async (req, res) => {
   const { id } = req.params;
-  const existing = db.prepare('SELECT 1 FROM favorites WHERE article_id=?').get(id);
-  if (existing) {
-    db.prepare('DELETE FROM favorites WHERE article_id=?').run(id);
+  const { rows } = await pool.query('SELECT 1 FROM favorites WHERE article_id=$1', [id]);
+  if (rows.length > 0) {
+    await pool.query('DELETE FROM favorites WHERE article_id=$1', [id]);
     res.json({ favorite: false });
   } else {
-    db.prepare('INSERT INTO favorites (article_id, saved_at) VALUES (?,?)').run(id, Date.now());
+    await pool.query('INSERT INTO favorites (article_id, saved_at) VALUES ($1,$2)', [id, Date.now()]);
     res.json({ favorite: true });
   }
 });
@@ -301,6 +312,7 @@ if (existsSync(DIST)) {
   app.get('*', (_, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
-app.listen(PORT, () => {
-  console.log(`[Inkwell] Server running on http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => rebuildIndex())
+  .then(() => app.listen(PORT, () => console.log(`[Inkwell] Server running on http://localhost:${PORT}`)))
+  .catch(err => { console.error('[Inkwell] Startup error:', err); process.exit(1); });
