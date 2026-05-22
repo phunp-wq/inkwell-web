@@ -214,7 +214,6 @@ Rules: tags 3-5 items · category MUST match listed values · no text outside JS
       body: JSON.stringify({
         model: AI_MODEL,
         temperature: 0.0,
-        response_format: { type: 'json_object' },
         messages: [{ role: 'user', content: prompt }],
       }),
     });
