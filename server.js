@@ -16,7 +16,10 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const AI_MODEL = 'openai/gpt-oss-120b:free';
 
 // ─── SQLite init ──────────────────────────────────────────────────────────────
-const db = new Database(path.join(__dirname, 'inkwell.db'));
+// DATA_DIR is set to a Railway persistent volume mount path (e.g. /data).
+// Falls back to __dirname for local dev.
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const db = new Database(path.join(DATA_DIR, 'inkwell.db'));
 db.exec(`CREATE TABLE IF NOT EXISTS articles (
   id          TEXT PRIMARY KEY,
   url         TEXT NOT NULL,
