@@ -153,6 +153,7 @@ app.post('/api/pipeline', async (req, res) => {
   if (existing) return res.status(409).json({ error: 'Article already saved', id: existing.id });
 
   const id = crypto.randomUUID();
+  let articleSaved = false;
 
   try {
     const html = await fetchHtml(url);
@@ -161,6 +162,7 @@ app.post('/api/pipeline', async (req, res) => {
     db.prepare(`INSERT INTO articles (id,url,title,content,site_name,byline,word_count,saved_at,ai_processed)
                 VALUES (?,?,?,?,?,?,?,?,0)`)
       .run(id, url, title, content, siteName, byline, wordCount, Date.now());
+    articleSaved = true;
 
     const lang = detectLanguage(content);
     const isVi = lang === 'Vietnamese';
@@ -231,7 +233,7 @@ Rules: tags 3-5 items · category MUST match listed values · no text outside JS
       ai: { summary: parsed.summary, tags: parsed.tags, category: parsed.category }
     });
   } catch (e) {
-    db.prepare('DELETE FROM articles WHERE id=?').run(id);
+    if (!articleSaved) db.prepare('DELETE FROM articles WHERE id=?').run(id);
     res.status(500).json({ error: e.message });
   }
 });
