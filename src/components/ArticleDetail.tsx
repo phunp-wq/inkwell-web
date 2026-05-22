@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown'
 import { useApp } from '../store/AppContext'
 import { CATEGORY_COLORS } from '../store/types'
 
@@ -148,11 +149,9 @@ export default function ArticleDetail() {
         {a.content && (
           <>
             <div style={{ height: 1, background: 'var(--border)', marginBottom: 28 }} />
-            <div style={{
-              fontSize: 15, color: 'var(--text-2)', lineHeight: 1.85,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            }}>
-              {a.content}
+            <div style={{ fontSize: 15, color: 'var(--text-2)', lineHeight: 1.85, wordBreak: 'break-word' }}
+                 className="article-body">
+              <ReactMarkdown>{a.content}</ReactMarkdown>
             </div>
           </>
         )}

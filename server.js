@@ -14,6 +14,7 @@ const PORT = process.env.PORT || 3777;
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const AI_MODEL = 'openai/gpt-oss-120b:free';
+const JINA_API_KEY = process.env.JINA_API_KEY || '';
 
 // ─── PostgreSQL init ──────────────────────────────────────────────────────────
 const pool = new Pool({
@@ -46,6 +47,41 @@ function safeJson(str, fallback) {
   try { return JSON.parse(str); } catch (_) { return fallback; }
 }
 
+async function extractViaJina(url) {
+  if (!JINA_API_KEY) throw new Error('No Jina API key');
+
+  const res = await fetch(`https://r.jina.ai/${url}`, {
+    headers: {
+      'Authorization': `Bearer ${JINA_API_KEY}`,
+      'X-Engine': 'readerlm-v2',
+      'Accept': 'application/json',
+      'X-Return-Format': 'markdown',
+      'X-Remove-Selector': 'nav, footer, aside, .ads, .cookie-banner, [class*="sidebar"], [class*="related"], [class*="newsletter"]',
+      'X-Timeout': '30',
+    },
+    signal: AbortSignal.timeout(35000),
+  });
+
+  if (!res.ok) throw new Error(`Jina ${res.status}`);
+
+  const json = await res.json();
+  const content = json.data?.content || json.content || '';
+  const title   = json.data?.title   || json.title   || '';
+
+  if (!content || content.split(/\s+/).length < 50) {
+    throw new Error('Jina returned insufficient content');
+  }
+
+  return {
+    content,
+    title:     title || new URL(url).hostname,
+    siteName:  new URL(url).hostname,
+    byline:    '',
+    wordCount: content.split(/\s+/).length,
+    source:    'jina',
+  };
+}
+
 async function fetchHtml(url) {
   const r = await fetch(url, {
     headers: {
@@ -61,6 +97,7 @@ async function fetchHtml(url) {
 }
 
 async function extractContent(html, url) {
+  // Fallback 1: Trafilatura
   try {
     const trafilatura = await new Promise((resolve, reject) => {
       const py = spawn(PYTHON, [TRAFILATURA_SCRIPT, url]);
@@ -79,26 +116,29 @@ async function extractContent(html, url) {
       py.on('error', reject);
     });
     return {
-      content: trafilatura.text,
-      title: trafilatura.title || new URL(url).hostname,
-      siteName: trafilatura.sitename || new URL(url).hostname,
-      byline: trafilatura.author || '',
+      content:   trafilatura.text,
+      title:     trafilatura.title || new URL(url).hostname,
+      siteName:  trafilatura.sitename || new URL(url).hostname,
+      byline:    trafilatura.author || '',
       wordCount: trafilatura.wordCount,
+      source:    'trafilatura',
     };
-  } catch (_) {
-    const dom = new JSDOM(html, { url });
-    const reader = new Readability(dom.window.document);
-    const article = reader.parse();
-    if (!article) throw new Error('Could not extract article — page may require JS or login');
-    const content = article.textContent.trim();
-    return {
-      content,
-      title: article.title || 'Untitled',
-      siteName: article.siteName || new URL(url).hostname,
-      byline: article.byline || '',
-      wordCount: content.split(/\s+/).length,
-    };
-  }
+  } catch (_) {}
+
+  // Fallback 2: Readability.js
+  const dom     = new JSDOM(html, { url });
+  const reader  = new Readability(dom.window.document);
+  const article = reader.parse();
+  if (!article) throw new Error('Could not extract article — page may require JS or login');
+  const content = article.textContent.trim();
+  return {
+    content,
+    title:     article.title    || 'Untitled',
+    siteName:  article.siteName || new URL(url).hostname,
+    byline:    article.byline   || '',
+    wordCount: content.split(/\s+/).length,
+    source:    'readability',
+  };
 }
 
 function detectLanguage(text) {
@@ -162,8 +202,15 @@ app.post('/api/pipeline', async (req, res) => {
   let articleSaved = false;
 
   try {
-    const html = await fetchHtml(url);
-    const { content, title, siteName, byline, wordCount } = await extractContent(html, url);
+    let extractResult;
+    try {
+      extractResult = await extractViaJina(url);
+    } catch (jinaErr) {
+      console.warn('[Inkwell] Jina failed, using HTML fallback:', jinaErr.message);
+      const html = await fetchHtml(url);
+      extractResult = await extractContent(html, url);
+    }
+    const { content, title, siteName, byline, wordCount } = extractResult;
 
     await pool.query(
       `INSERT INTO articles (id,url,title,content,site_name,byline,word_count,saved_at,ai_processed)
@@ -242,6 +289,7 @@ ${content.slice(0, 12000)}`;
 
     res.json({
       id, url, title, siteName, wordCount, lang,
+      extractionSource: extractResult.source || 'unknown',
       ai: { summary: parsed.summary, tags: parsed.tags, category: parsed.category }
     });
   } catch (e) {
