@@ -12540,16 +12540,17 @@ const CATEGORY_COLORS = {
   Science: "#EC4899",
   Other: "#6B7280"
 };
-const CATEGORIES = Object.keys(CATEGORY_COLORS).filter((c) => c !== "Other");
 function Sidebar() {
   const { articles, filterView, setFilterView, setPaletteOpen } = useApp();
   const [catOpen, setCatOpen] = reactExports.useState(true);
+  const [tagOpen, setTagOpen] = reactExports.useState(true);
   const allCount = articles.length;
   const favCount = articles.filter((a) => a.favorite).length;
   const categoryCounts = {};
   articles.forEach((a) => {
-    categoryCounts[a.category] = (categoryCounts[a.category] || 0) + 1;
+    if (a.category) categoryCounts[a.category] = (categoryCounts[a.category] || 0) + 1;
   });
+  const CATEGORIES = Object.keys(categoryCounts).sort();
   const allTags = [...new Set(articles.flatMap((a) => a.tags))].slice(0, 20);
   const isActive = (v) => {
     if (typeof v === "string" && typeof filterView === "string") return v === filterView;
@@ -12620,7 +12621,7 @@ function Sidebar() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "8.5", y: "8.5", width: "4", height: "4", rx: "1", stroke: "currentColor", strokeWidth: "1.3" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(NavItem, { label: "Favorites", count: favCount, active: isActive("favorites"), onClick: () => setFilterView("favorites"), children: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M7 1.5L8.545 5.13H12.5L9.477 7.37L10.618 11.5L7 9.13L3.382 11.5L4.523 7.37L1.5 5.13H5.455L7 1.5Z", stroke: "currentColor", strokeWidth: "1.3", strokeLinejoin: "round" }) }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { marginTop: 12 }, children: [
+      CATEGORIES.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { marginTop: 12 }, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
           {
@@ -12673,7 +12674,7 @@ function Sidebar() {
               if (!isActive({ type: "category", value: cat })) e.currentTarget.style.background = "transparent";
             },
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0 } }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: CATEGORY_COLORS[cat] ?? CATEGORY_COLORS.Other, flexShrink: 0 } }),
               cat,
               categoryCounts[cat] && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { marginLeft: "auto", fontSize: 11, color: "var(--text-3)" }, children: categoryCounts[cat] })
             ]
@@ -12682,8 +12683,35 @@ function Sidebar() {
         )) })
       ] }),
       allTags.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: { marginTop: 12 }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { padding: "4px 10px", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-3)" }, children: "Tags" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { padding: "4px 8px", display: "flex", flexWrap: "wrap", gap: 4 }, children: allTags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            onClick: () => setTagOpen((o) => !o),
+            style: {
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: "var(--text-3)",
+              borderRadius: "var(--r-md)"
+            },
+            children: [
+              "Tags",
+              /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", style: { transform: tagOpen ? "rotate(90deg)" : "rotate(0)", transition: "transform 150ms ease" }, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M4 3l3 3-3 3", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round" }) })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: {
+          maxHeight: tagOpen ? 400 : 0,
+          overflow: "hidden",
+          transition: "max-height 200ms ease, opacity 150ms ease",
+          opacity: tagOpen ? 1 : 0
+        }, children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { padding: "4px 8px", display: "flex", flexWrap: "wrap", gap: 4 }, children: allTags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
             onClick: () => setFilterView({ type: "tag", value: tag }),
@@ -12699,7 +12727,7 @@ function Sidebar() {
             children: tag
           },
           tag
-        )) })
+        )) }) })
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { borderTop: "1px solid var(--border)", padding: 8 }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(NavItem, { label: "Settings", active: false, onClick: () => {

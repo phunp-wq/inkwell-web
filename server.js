@@ -13,7 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 3777;
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const AI_MODEL = 'qwen/qwen-2.5-72b-instruct';
+const AI_MODEL = 'openai/gpt-oss-120b:free';
 
 // ─── SQLite init ──────────────────────────────────────────────────────────────
 const db = new Database(path.join(__dirname, 'inkwell.db'));
@@ -167,18 +167,11 @@ app.post('/api/pipeline', async (req, res) => {
     const lang = detectLanguage(content);
     const isVi = lang === 'Vietnamese';
 
-    const prompt = isVi
+    const systemPrompt = isVi
       ? `Bạn là trợ lý AI phân tích bài báo.
-Chỉ xuất ra một JSON object hợp lệ duy nhất — không markdown, không giải thích.
+Xuất ra DUY NHẤT một JSON object hợp lệ — không markdown, không code fence, không giải thích, không văn bản ngoài JSON.
 
-Tiêu đề: "${title}"
-Nguồn: ${url}
-
-Nội dung:
-${content.slice(0, 12000)}
-
----
-Trả về đúng cấu trúc JSON này:
+Cấu trúc JSON bắt buộc:
 {
   "title": "tiêu đề đã làm sạch",
   "language": "vi",
@@ -186,18 +179,11 @@ Trả về đúng cấu trúc JSON này:
   "category": "một trong: Design / Development / Product / AI-ML / Business / Research / Science / Other",
   "tags": ["tag1", "tag2", "tag3"]
 }
-Quy tắc: tags 3-5 mục · category PHẢI khớp chính xác · không có văn bản ngoài JSON`
+Quy tắc: tags 3-5 mục · category PHẢI khớp chính xác một giá trị trong danh sách.`
       : `You are an AI assistant that analyzes articles.
-Output ONLY a single valid JSON object — no markdown, no code fences, no explanation.
+Output ONLY a single valid JSON object — no markdown, no code fences, no explanation, no text outside the JSON.
 
-Article title: "${title}"
-Source: ${url}
-
-Content:
-${content.slice(0, 12000)}
-
----
-Return this exact JSON structure:
+Required JSON structure:
 {
   "title": "cleaned article title",
   "language": "en",
@@ -205,7 +191,19 @@ Return this exact JSON structure:
   "category": "one of: Design / Development / Product / AI-ML / Business / Research / Science / Other",
   "tags": ["tag1", "tag2", "tag3"]
 }
-Rules: tags 3-5 items · category MUST match listed values · no text outside JSON`;
+Rules: tags 3-5 items · category MUST match exactly one listed value.`;
+
+    const userPrompt = isVi
+      ? `Tiêu đề: "${title}"
+Nguồn: ${url}
+
+Nội dung:
+${content.slice(0, 12000)}`
+      : `Article title: "${title}"
+Source: ${url}
+
+Content:
+${content.slice(0, 12000)}`;
 
     const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -215,8 +213,12 @@ Rules: tags 3-5 items · category MUST match listed values · no text outside JS
       },
       body: JSON.stringify({
         model: AI_MODEL,
-        temperature: 0.0,
-        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        reasoning: { effort: 'low' },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
       }),
     });
     const aiJson = await aiRes.json();
