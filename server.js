@@ -219,6 +219,7 @@ Rules: tags 3-5 items · category MUST match listed values · no text outside JS
       }),
     });
     const aiJson = await aiRes.json();
+    if (!aiJson.choices?.[0]) throw new Error(`OpenRouter error: ${JSON.stringify(aiJson)}`);
     const parsed = parseJsonOutput(aiJson.choices[0].message.content);
 
     db.prepare(`UPDATE articles SET summary=?,tags=?,category=?,ai_processed=1 WHERE id=?`)
