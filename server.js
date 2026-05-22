@@ -47,24 +47,59 @@ function safeJson(str, fallback) {
   try { return JSON.parse(str); } catch (_) { return fallback; }
 }
 
-async function extractViaJina(url) {
+const JINA_REMOVE_SELECTORS = [
+  'nav', 'footer', 'header', 'aside',
+  '[class*="sidebar"]', '[class*="related"]',
+  '[class*="subscribe"]', '[class*="newsletter"]',
+  '[class*="comment"]', '[class*="discussion"]',
+  '[class*="top-post"]', '[class*="popular"]',
+  '.ads', '.advertisement', '.cookie-banner', '.cookie-notice',
+  '[class*="social-share"]', '[id*="disqus"]',
+  '.subscription-widget-wrap', '.post-footer', '.post-ufi',
+  '[data-testid="storyReadMore"]', '.pw-responses',
+].join(', ');
+
+async function resolveSubstackUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'substack.com' && u.pathname.startsWith('/home/post/p-')) {
+      const postId = u.pathname.split('/').pop().split('?')[0];
+      const res = await fetch(`https://substack.com/api/v1/posts/by-id/${postId}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.canonical_url || url;
+      }
+    }
+  } catch (_) {}
+  return url;
+}
+
+async function extractViaJina(rawUrl) {
   if (!JINA_API_KEY) throw new Error('No Jina API key');
+
+  const url = await resolveSubstackUrl(rawUrl);
 
   const res = await fetch(`https://r.jina.ai/${url}`, {
     headers: {
-      'Authorization': `Bearer ${JINA_API_KEY}`,
-      'X-Engine': 'readerlm-v2',
-      'Accept': 'application/json',
-      'X-Return-Format': 'markdown',
-      'X-Remove-Selector': 'nav, footer, aside, .ads, .cookie-banner, [class*="sidebar"], [class*="related"], [class*="newsletter"]',
-      'X-Timeout': '30',
+      'Authorization':     `Bearer ${JINA_API_KEY}`,
+      'Accept':            'application/json',
+      'X-Engine':          'browser',
+      'X-Return-Format':   'markdown',
+      'X-Respond-With':    'readerlm-v2',
+      'X-Target-Selector': 'article, main, [role="main"], .post-content, .entry-content, .article-content, .available-content',
+      'X-Remove-Selector': JINA_REMOVE_SELECTORS,
+      'X-Retain-Images':   'none',
+      'X-Timeout':         '30',
     },
     signal: AbortSignal.timeout(35000),
   });
 
   if (!res.ok) throw new Error(`Jina ${res.status}`);
 
-  const json = await res.json();
+  const json    = await res.json();
   const content = json.data?.content || json.content || '';
   const title   = json.data?.title   || json.title   || '';
 
@@ -76,7 +111,7 @@ async function extractViaJina(url) {
     content,
     title:     title || new URL(url).hostname,
     siteName:  new URL(url).hostname,
-    byline:    '',
+    byline:    json.data?.author || '',
     wordCount: content.split(/\s+/).length,
     source:    'jina',
   };
@@ -99,7 +134,7 @@ async function fetchHtml(url) {
 async function extractContent(html, url) {
   // Fallback 1: Trafilatura
   try {
-    const trafilatura = await new Promise((resolve, reject) => {
+    const result = await new Promise((resolve, reject) => {
       const py = spawn(PYTHON, [TRAFILATURA_SCRIPT, url]);
       const chunks = [];
       py.stdout.on('data', d => chunks.push(d));
@@ -107,8 +142,7 @@ async function extractContent(html, url) {
       py.stdin.end();
       py.on('close', () => {
         try {
-          const out = Buffer.concat(chunks).toString('utf8').trim();
-          const parsed = JSON.parse(out);
+          const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8').trim());
           if (parsed.success && parsed.text && parsed.wordCount > 50) resolve(parsed);
           else reject(new Error(parsed.error || 'extraction failed'));
         } catch (e) { reject(e); }
@@ -116,19 +150,18 @@ async function extractContent(html, url) {
       py.on('error', reject);
     });
     return {
-      content:   trafilatura.text,
-      title:     trafilatura.title || new URL(url).hostname,
-      siteName:  trafilatura.sitename || new URL(url).hostname,
-      byline:    trafilatura.author || '',
-      wordCount: trafilatura.wordCount,
+      content:   result.text,
+      title:     result.title    || new URL(url).hostname,
+      siteName:  result.sitename || new URL(url).hostname,
+      byline:    result.author   || '',
+      wordCount: result.wordCount,
       source:    'trafilatura',
     };
   } catch (_) {}
 
   // Fallback 2: Readability.js
   const dom     = new JSDOM(html, { url });
-  const reader  = new Readability(dom.window.document);
-  const article = reader.parse();
+  const article = new Readability(dom.window.document).parse();
   if (!article) throw new Error('Could not extract article — page may require JS or login');
   const content = article.textContent.trim();
   return {
