@@ -292,7 +292,7 @@ app.post('/api/articles/:id/favorite', (req, res) => {
 });
 
 // ─── Serve React frontend ─────────────────────────────────────────────────────
-const DIST = path.join(__dirname, 'public');
+const DIST = path.join(__dirname, 'dist');
 if (existsSync(DIST)) {
   app.use(express.static(DIST));
   app.get('*', (_, res) => res.sendFile(path.join(DIST, 'index.html')));
