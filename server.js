@@ -162,6 +162,56 @@ function detectLanguage(text) {
   return (text.slice(0, 3000).match(viet) || []).length > 3 ? 'Vietnamese' : 'English';
 }
 
+// Incremental extractor for the "summary" string field inside a streaming JSON object.
+// Feed chunks via .push(chunk) → it returns any newly-revealed summary characters (unescaped).
+function makeSummaryStreamer() {
+  let buf = '';
+  let state = 'searching'; // searching → inside → done
+  let escape = false;
+  return {
+    push(chunk) {
+      buf += chunk;
+      let out = '';
+      if (state === 'searching') {
+        const m = buf.match(/"summary"\s*:\s*"/);
+        if (!m) return '';
+        buf = buf.slice(m.index + m[0].length);
+        state = 'inside';
+      }
+      if (state === 'inside') {
+        let i = 0;
+        while (i < buf.length) {
+          const c = buf[i];
+          if (escape) {
+            // handle simple JSON escapes
+            if (c === 'n') out += '\n';
+            else if (c === 't') out += '\t';
+            else if (c === 'r') out += '\r';
+            else if (c === '"') out += '"';
+            else if (c === '\\') out += '\\';
+            else if (c === '/') out += '/';
+            else out += c;
+            escape = false;
+            i++;
+          } else if (c === '\\') {
+            escape = true;
+            i++;
+          } else if (c === '"') {
+            state = 'done';
+            buf = buf.slice(i + 1);
+            return out;
+          } else {
+            out += c;
+            i++;
+          }
+        }
+        buf = '';
+      }
+      return out;
+    },
+  };
+}
+
 function parseJsonOutput(text) {
   text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -192,14 +242,160 @@ async function rebuildIndex() {
   rows.forEach(r => miniSearch.add({ ...r, tags: safeJson(r.tags, []).join(' ') }));
 }
 
+// ─── Pipeline helpers (shared by blocking + streaming endpoints) ─────────────
+
+async function extractAndSave(url) {
+  const id = crypto.randomUUID();
+  let extractResult;
+  try {
+    extractResult = await extractViaJina(url);
+  } catch (jinaErr) {
+    console.warn('[Inkwell] Jina failed, using HTML fallback:', jinaErr.message);
+    const html = await fetchHtml(url);
+    extractResult = await extractContent(html, url);
+  }
+  const { content, title, siteName, byline, wordCount } = extractResult;
+  await pool.query(
+    `INSERT INTO articles (id,url,title,content,site_name,byline,word_count,saved_at,ai_processed)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)`,
+    [id, url, title, content, siteName, byline, wordCount, Date.now()]
+  );
+  return { id, ...extractResult };
+}
+
+function buildAiPrompts(title, content, url) {
+  const lang = detectLanguage(content);
+  const isVi = lang === 'Vietnamese';
+  const systemPrompt = isVi
+    ? `Bạn là trợ lý AI phân tích bài báo.
+Xuất ra DUY NHẤT một JSON object hợp lệ — không markdown, không code fence, không giải thích, không văn bản ngoài JSON.
+
+Cấu trúc JSON bắt buộc:
+{
+  "title": "tiêu đề đã làm sạch",
+  "language": "vi",
+  "summary": "tóm tắt 5-6 câu bằng tiếng Việt",
+  "category": "một trong: Design / Development / Product / AI-ML / Business / Research / Science / Other",
+  "tags": ["tag1", "tag2", "tag3"]
+}
+Quy tắc: tags 3-5 mục · category PHẢI khớp chính xác một giá trị trong danh sách.`
+    : `You are an AI assistant that analyzes articles.
+Output ONLY a single valid JSON object — no markdown, no code fences, no explanation, no text outside the JSON.
+
+Required JSON structure:
+{
+  "title": "cleaned article title",
+  "language": "en",
+  "summary": "5-6 sentence summary in English",
+  "category": "one of: Design / Development / Product / AI-ML / Business / Research / Science / Other",
+  "tags": ["tag1", "tag2", "tag3"]
+}
+Rules: tags 3-5 items · category MUST match exactly one listed value.`;
+  const userPrompt = isVi
+    ? `Tiêu đề: "${title}"\nNguồn: ${url}\n\nNội dung:\n${content.slice(0, 12000)}`
+    : `Article title: "${title}"\nSource: ${url}\n\nContent:\n${content.slice(0, 12000)}`;
+  return { systemPrompt, userPrompt, lang };
+}
+
+async function runAI(extractResult, url, onSummaryChunk) {
+  const { title, content } = extractResult;
+  const { systemPrompt, userPrompt, lang } = buildAiPrompts(title, content, url);
+
+  const body = {
+    model: AI_MODEL,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: `/no_think\n${systemPrompt}` },
+      { role: 'user', content: userPrompt },
+    ],
+  };
+
+  if (!onSummaryChunk) {
+    const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const aiJson = await aiRes.json();
+    if (!aiJson.choices?.[0]) throw new Error(`OpenRouter error: ${JSON.stringify(aiJson)}`);
+    return { parsed: parseJsonOutput(aiJson.choices[0].message.content), lang };
+  }
+
+  // Streaming branch
+  const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+  if (!aiRes.ok || !aiRes.body) {
+    const errText = await aiRes.text().catch(() => '');
+    throw new Error(`OpenRouter error: ${aiRes.status} ${errText}`);
+  }
+
+  const reader = aiRes.body.getReader();
+  const decoder = new TextDecoder();
+  const streamer = makeSummaryStreamer();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === '[DONE]') continue;
+      try {
+        const json = JSON.parse(data);
+        const delta = json.choices?.[0]?.delta?.content || '';
+        if (delta) {
+          fullText += delta;
+          const chunk = streamer.push(delta);
+          if (chunk) onSummaryChunk(chunk);
+        }
+      } catch (_) {}
+    }
+  }
+
+  return { parsed: parseJsonOutput(fullText), lang };
+}
+
 app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
+
+// Optional bearer auth — only enforced if INKWELL_API_TOKEN is set.
+// Webapp (same-origin) is exempt; only /api/* checked.
+const INKWELL_API_TOKEN = process.env.INKWELL_API_TOKEN || '';
+if (INKWELL_API_TOKEN) {
+  app.use('/api', (req, res, next) => {
+    // Allow same-origin requests from the webapp (no Origin header or same host).
+    const origin = req.headers.origin;
+    if (!origin || origin === `http://${req.headers.host}` || origin === `https://${req.headers.host}`) {
+      return next();
+    }
+    const auth = req.headers.authorization || '';
+    if (auth !== `Bearer ${INKWELL_API_TOKEN}`) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+    next();
+  });
+}
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 app.get('/api/models', (_, res) => {
@@ -220,101 +416,113 @@ app.post('/api/pipeline', async (req, res) => {
     await pool.query('DELETE FROM articles WHERE id=$1', [existing[0].id]);
   }
 
-  const id = crypto.randomUUID();
-
+  let articleId = null;
   try {
-    let extractResult;
-    try {
-      extractResult = await extractViaJina(url);
-    } catch (jinaErr) {
-      console.warn('[Inkwell] Jina failed, using HTML fallback:', jinaErr.message);
-      const html = await fetchHtml(url);
-      extractResult = await extractContent(html, url);
-    }
-    const { content, title, siteName, byline, wordCount } = extractResult;
-
-    await pool.query(
-      `INSERT INTO articles (id,url,title,content,site_name,byline,word_count,saved_at,ai_processed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)`,
-      [id, url, title, content, siteName, byline, wordCount, Date.now()]
-    );
-
-    const lang = detectLanguage(content);
-    const isVi = lang === 'Vietnamese';
-
-    const systemPrompt = isVi
-      ? `Bạn là trợ lý AI phân tích bài báo.
-Xuất ra DUY NHẤT một JSON object hợp lệ — không markdown, không code fence, không giải thích, không văn bản ngoài JSON.
-
-Cấu trúc JSON bắt buộc:
-{
-  "title": "tiêu đề đã làm sạch",
-  "language": "vi",
-  "summary": "tóm tắt 5-6 câu bằng tiếng Việt",
-  "category": "một trong: Design / Development / Product / AI-ML / Business / Research / Science / Other",
-  "tags": ["tag1", "tag2", "tag3"]
-}
-Quy tắc: tags 3-5 mục · category PHẢI khớp chính xác một giá trị trong danh sách.`
-      : `You are an AI assistant that analyzes articles.
-Output ONLY a single valid JSON object — no markdown, no code fences, no explanation, no text outside the JSON.
-
-Required JSON structure:
-{
-  "title": "cleaned article title",
-  "language": "en",
-  "summary": "5-6 sentence summary in English",
-  "category": "one of: Design / Development / Product / AI-ML / Business / Research / Science / Other",
-  "tags": ["tag1", "tag2", "tag3"]
-}
-Rules: tags 3-5 items · category MUST match exactly one listed value.`;
-
-    const userPrompt = isVi
-      ? `Tiêu đề: "${title}"
-Nguồn: ${url}
-
-Nội dung:
-${content.slice(0, 12000)}`
-      : `Article title: "${title}"
-Source: ${url}
-
-Content:
-${content.slice(0, 12000)}`;
-
-    const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: `/no_think\n${systemPrompt}` },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
-    const aiJson = await aiRes.json();
-    if (!aiJson.choices?.[0]) throw new Error(`OpenRouter error: ${JSON.stringify(aiJson)}`);
-    const parsed = parseJsonOutput(aiJson.choices[0].message.content);
-
+    const extractResult = await extractAndSave(url);
+    articleId = extractResult.id;
+    const { parsed, lang } = await runAI(extractResult, url);
     await pool.query(
       `UPDATE articles SET summary=$1,tags=$2,category=$3,ai_processed=1 WHERE id=$4`,
-      [parsed.summary, JSON.stringify(parsed.tags), parsed.category, id]
+      [parsed.summary, JSON.stringify(parsed.tags), parsed.category, articleId]
     );
-
     await rebuildIndex();
-
     res.json({
-      id, url, title, siteName, wordCount, lang,
+      id: articleId, url,
+      title: extractResult.title,
+      siteName: extractResult.siteName,
+      wordCount: extractResult.wordCount,
+      lang,
       extractionSource: extractResult.source || 'unknown',
       ai: { summary: parsed.summary, tags: parsed.tags, category: parsed.category }
     });
   } catch (e) {
-    await pool.query('DELETE FROM articles WHERE id=$1', [id]);
+    if (articleId) await pool.query('DELETE FROM articles WHERE id=$1', [articleId]);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ─── Streaming pipeline (SSE) — for Chrome extension popup ───────────────────
+app.post('/api/pipeline/stream', async (req, res) => {
+  const { url } = req.body;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  if (!url) {
+    send('error', { message: 'url required' });
+    return res.end();
+  }
+
+  try {
+    const { rows: existing } = await pool.query('SELECT id, ai_processed FROM articles WHERE url=$1', [url]);
+    if (existing[0]) {
+      if (existing[0].ai_processed) {
+        send('error', { code: 'already_saved', id: existing[0].id, message: 'Article already saved' });
+        return res.end();
+      }
+      await pool.query('DELETE FROM articles WHERE id=$1', [existing[0].id]);
+    }
+  } catch (e) {
+    send('error', { message: e.message });
+    return res.end();
+  }
+
+  let articleId = null;
+  try {
+    send('start', { url });
+    const extractResult = await extractAndSave(url);
+    articleId = extractResult.id;
+    send('extracted', {
+      id: articleId,
+      title: extractResult.title,
+      siteName: extractResult.siteName,
+      byline: extractResult.byline,
+      wordCount: extractResult.wordCount,
+    });
+    send('ai_start', {});
+
+    const { parsed, lang } = await runAI(extractResult, url, (chunk) => {
+      send('summary_chunk', { text: chunk });
+    });
+
+    await pool.query(
+      `UPDATE articles SET summary=$1,tags=$2,category=$3,ai_processed=1 WHERE id=$4`,
+      [parsed.summary, JSON.stringify(parsed.tags), parsed.category, articleId]
+    );
+    await rebuildIndex();
+
+    send('done', {
+      id: articleId,
+      url,
+      title: extractResult.title,
+      summary: parsed.summary,
+      tags: parsed.tags,
+      category: parsed.category,
+      lang,
+    });
+    res.end();
+  } catch (e) {
+    if (articleId) await pool.query('DELETE FROM articles WHERE id=$1', [articleId]);
+    send('error', { message: e.message });
+    res.end();
+  }
+});
+
+// ─── Recent articles (Chrome extension idle list) ────────────────────────────
+app.get('/api/recent', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 3, 10);
+  const { rows } = await pool.query(
+    `SELECT id, title, url, category, saved_at FROM articles
+     WHERE ai_processed=1 ORDER BY saved_at DESC LIMIT $1`,
+    [limit]
+  );
+  res.json(rows);
 });
 
 // ─── List / search articles ───────────────────────────────────────────────────
