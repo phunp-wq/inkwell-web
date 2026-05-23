@@ -241,7 +241,7 @@ export default function CommandPalette() {
                   <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {a.title}
                   </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{a.site_name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{a.byline || a.site_name}</span>
                 </div>
               ))}
             </>

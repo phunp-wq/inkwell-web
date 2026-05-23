@@ -71,7 +71,7 @@ function ArticleRow({ article }: { article: Article }) {
         width: 120, fontSize: 12, color: 'var(--text-3)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {article.site_name}
+        {article.byline || article.site_name}
       </span>
 
       <span style={{ width: 56, fontSize: 12, color: 'var(--text-3)', textAlign: 'right' }}>

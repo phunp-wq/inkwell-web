@@ -7,6 +7,7 @@ export interface Article {
   tags: string[]
   category: string
   site_name: string
+  byline?: string
   word_count: number
   saved_at: number
   ai_processed: number

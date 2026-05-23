@@ -76,7 +76,7 @@ export default function ArticleDetail() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 13 }}>
           <span style={{ fontWeight: 600, color }}>{a.category}</span>
           <span style={{ color: 'var(--text-3)' }}>·</span>
-          <span style={{ color: 'var(--text-2)' }}>{a.site_name}</span>
+          <span style={{ color: 'var(--text-2)' }}>{a.byline || a.site_name}</span>
           <span style={{ color: 'var(--text-3)' }}>·</span>
           <span style={{ color: 'var(--text-2)' }}>{formatDate(a.saved_at)}</span>
           <span style={{ color: 'var(--text-3)' }}>·</span>

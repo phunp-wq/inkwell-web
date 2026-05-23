@@ -330,7 +330,7 @@ app.get('/api/articles', async (req, res) => {
   }
 
   const { rows } = await pool.query(
-    'SELECT id,url,title,summary,tags,category,site_name,word_count,saved_at,ai_processed FROM articles ORDER BY saved_at DESC'
+    'SELECT id,url,title,summary,tags,category,site_name,byline,word_count,saved_at,ai_processed FROM articles ORDER BY saved_at DESC'
   );
   const { rows: favRows } = await pool.query('SELECT article_id FROM favorites');
   const favIds = new Set(favRows.map(r => r.article_id));
