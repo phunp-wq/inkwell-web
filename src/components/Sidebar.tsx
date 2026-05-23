@@ -34,8 +34,8 @@ export default function Sidebar() {
       userSelect: 'none',
     }}>
       {/* Brand */}
-      <div style={{ padding: '20px 18px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+      <div style={{ padding: '28px 18px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <svg width="17" height="17" viewBox="0 0 12 12" fill="none">
               <path d="M2 3h8M2 6h5M2 9h7" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
@@ -46,7 +46,7 @@ export default function Sidebar() {
       </div>
 
       {/* Add URL button */}
-      <div style={{ padding: '0 12px 12px' }}>
+      <div style={{ padding: '16px 12px 12px' }}>
         <button
           onClick={() => setPaletteOpen(true)}
           style={{
