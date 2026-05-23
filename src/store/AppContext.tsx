@@ -91,7 +91,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       articles, loading, viewMode, filterView, searchQuery, selectedArticle, paletteOpen,
-      setViewMode, setFilterView, setSearchQuery,
+      setViewMode,
+      setFilterView: (v: FilterView) => { setFilterView(v); setSelectedArticle(null) },
+      setSearchQuery,
       openArticle: async (a: Article) => {
         setSelectedArticle(a)
         try {
