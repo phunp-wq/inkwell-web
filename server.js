@@ -5,7 +5,7 @@ const { JSDOM } = require('jsdom');
 const { Readability } = require('@mozilla/readability');
 const { Pool } = require('pg');
 const { spawn } = require('child_process');
-const MiniSearch = require('minisearch');
+const { Meilisearch } = require('meilisearch');
 const PYTHON = process.env.PYTHON_PATH || 'python3';
 const TRAFILATURA_SCRIPT = path.join(__dirname, 'trafilatura_extract.py');
 
@@ -227,19 +227,100 @@ function parseJsonOutput(text) {
   };
 }
 
-// ─── MiniSearch index ─────────────────────────────────────────────────────────
-const miniSearch = new MiniSearch({
-  fields: ['title', 'summary', 'content', 'tags'],
-  storeFields: ['id', 'url', 'title', 'summary', 'site_name', 'word_count', 'category', 'tags'],
-  searchOptions: { prefix: true, fuzzy: 0.2, boost: { title: 3, summary: 2, tags: 2 } }
-});
+// ─── Meilisearch ──────────────────────────────────────────────────────────────
+const MEILI_HOST = process.env.MEILI_HOST || 'http://127.0.0.1:7700';
+const MEILI_KEY  = process.env.MEILI_MASTER_KEY || '';
 
-async function rebuildIndex() {
-  const { rows } = await pool.query(
-    'SELECT id,url,title,summary,content,tags,site_name,word_count,category FROM articles WHERE ai_processed=1'
-  );
-  if (miniSearch.documentCount > 0) miniSearch.removeAll();
-  rows.forEach(r => miniSearch.add({ ...r, tags: safeJson(r.tags, []).join(' ') }));
+const meili = new Meilisearch({ host: MEILI_HOST, apiKey: MEILI_KEY });
+const articlesIndex = meili.index('articles');
+
+function removeDiacritics(s) {
+  return (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
+function toMeiliDoc(r) {
+  const tags = Array.isArray(r.tags) ? r.tags : safeJson(r.tags, []);
+  return {
+    id:          r.id,
+    url:         r.url,
+    title:       r.title || '',
+    title_nd:    removeDiacritics(r.title),
+    summary:     r.summary || '',
+    summary_nd:  removeDiacritics(r.summary),
+    content:     r.content || '',
+    content_nd:  removeDiacritics(r.content),
+    tags,
+    category:    r.category || 'Other',
+    site_name:   r.site_name || '',
+    saved_at:    Number(r.saved_at) || Date.now(),
+  };
+}
+
+// Wait until Meilisearch sidecar accepts connections (boot can take 1-3s).
+async function waitForMeili(maxMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    try {
+      await meili.health();
+      return true;
+    } catch (_) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  throw new Error('Meilisearch never became healthy');
+}
+
+async function setupMeilisearch() {
+  await waitForMeili();
+  await articlesIndex.updateSettings({
+    searchableAttributes: [
+      'title', 'title_nd',
+      'summary', 'summary_nd',
+      'content', 'content_nd',
+      'tags',
+    ],
+    filterableAttributes: ['category', 'tags', 'site_name'],
+    sortableAttributes:   ['saved_at'],
+    rankingRules: ['words', 'typo', 'proximity', 'attribute', 'sort', 'exactness'],
+    typoTolerance: {
+      enabled: true,
+      minWordSizeForTypos: { oneTypo: 4, twoTypos: 8 },
+    },
+  });
+
+  // Bootstrap: if index is empty but DB has articles, bulk-import (idempotent).
+  try {
+    const stats = await articlesIndex.getStats();
+    if (stats.numberOfDocuments === 0) {
+      const { rows } = await pool.query(
+        'SELECT id,url,title,summary,content,tags,site_name,saved_at,category FROM articles WHERE ai_processed=1'
+      );
+      if (rows.length > 0) {
+        await articlesIndex.addDocuments(rows.map(toMeiliDoc));
+        console.log(`[Inkwell] Bootstrapped Meili with ${rows.length} articles from DB`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Inkwell] Meili bootstrap skipped:', e.message);
+  }
+
+  console.log('[Inkwell] Meilisearch index ready');
+}
+
+// Sync a single article (best-effort — log on fail, don't throw).
+async function syncArticleToMeili(articleId) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id,url,title,summary,content,tags,site_name,saved_at,category FROM articles WHERE id=$1 AND ai_processed=1',
+      [articleId]
+    );
+    if (rows[0]) await articlesIndex.addDocuments([toMeiliDoc(rows[0])]);
+  } catch (e) {
+    console.warn('[Inkwell] Meili sync fail:', e.message);
+  }
 }
 
 // ─── Pipeline helpers (shared by blocking + streaming endpoints) ─────────────
@@ -425,7 +506,7 @@ app.post('/api/pipeline', async (req, res) => {
       `UPDATE articles SET summary=$1,tags=$2,category=$3,ai_processed=1 WHERE id=$4`,
       [parsed.summary, JSON.stringify(parsed.tags), parsed.category, articleId]
     );
-    await rebuildIndex();
+    await syncArticleToMeili(articleId);
     res.json({
       id: articleId, url,
       title: extractResult.title,
@@ -495,7 +576,7 @@ app.post('/api/pipeline/stream', async (req, res) => {
       `UPDATE articles SET summary=$1,tags=$2,category=$3,ai_processed=1 WHERE id=$4`,
       [parsed.summary, JSON.stringify(parsed.tags), parsed.category, articleId]
     );
-    await rebuildIndex();
+    await syncArticleToMeili(articleId);
 
     send('done', {
       id: articleId,
@@ -531,9 +612,14 @@ app.get('/api/articles', async (req, res) => {
 
   let ids = null;
   if (q && q.trim()) {
-    const results = miniSearch.search(q.trim(), { limit: 100 });
-    ids = new Set(results.map(r => r.id));
-    if (ids.size === 0) return res.json([]);
+    try {
+      const result = await articlesIndex.search(q.trim(), { limit: 100, attributesToRetrieve: ['id'] });
+      ids = new Set(result.hits.map(h => h.id));
+      if (ids.size === 0) return res.json([]);
+    } catch (e) {
+      console.warn('[Inkwell] Meili search fail:', e.message);
+      return res.json([]);
+    }
   }
 
   const { rows } = await pool.query(
@@ -563,7 +649,9 @@ app.get('/api/articles/:id', async (req, res) => {
 app.delete('/api/articles/:id', async (req, res) => {
   await pool.query('DELETE FROM articles WHERE id=$1', [req.params.id]);
   await pool.query('DELETE FROM favorites WHERE article_id=$1', [req.params.id]);
-  await rebuildIndex();
+  await articlesIndex.deleteDocument(req.params.id).catch(e =>
+    console.warn('[Inkwell] Meili delete fail:', e.message)
+  );
   res.json({ ok: true });
 });
 
@@ -588,6 +676,9 @@ if (existsSync(DIST)) {
 }
 
 initDb()
-  .then(() => rebuildIndex())
-  .then(() => app.listen(PORT, () => console.log(`[Inkwell] Server running on http://localhost:${PORT}`)))
+  .then(() => {
+    // Meilisearch boot is best-effort — server still serves DB-only endpoints if it fails.
+    setupMeilisearch().catch(err => console.error('[Inkwell] Meilisearch setup failed:', err.message));
+    app.listen(PORT, () => console.log(`[Inkwell] Server running on http://localhost:${PORT}`));
+  })
   .catch(err => { console.error('[Inkwell] Startup error:', err); process.exit(1); });
