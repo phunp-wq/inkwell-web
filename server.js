@@ -293,7 +293,8 @@ async function setupMeilisearch() {
     },
   });
 
-  // Bootstrap: if index is empty but DB has articles, bulk-import (idempotent).
+  // Bootstrap: if index is empty but DB has articles, bulk-import.
+  // Idempotent — safe to run on every container start.
   try {
     const stats = await articlesIndex.getStats();
     if (stats.numberOfDocuments === 0) {
@@ -301,9 +302,13 @@ async function setupMeilisearch() {
         'SELECT id,url,title,summary,content,tags,site_name,saved_at,category FROM articles WHERE ai_processed=1'
       );
       if (rows.length > 0) {
-        await articlesIndex.addDocuments(rows.map(toMeiliDoc));
+        const task = await articlesIndex.addDocuments(rows.map(toMeiliDoc));
+        // Wait for the indexing task so a quick test query right after boot works.
+        await meili.tasks.waitForTask(task.taskUid, { timeOutMs: 30000 });
         console.log(`[Inkwell] Bootstrapped Meili with ${rows.length} articles from DB`);
       }
+    } else {
+      console.log(`[Inkwell] Meili already has ${stats.numberOfDocuments} docs, skipping bootstrap`);
     }
   } catch (e) {
     console.warn('[Inkwell] Meili bootstrap skipped:', e.message);
@@ -595,35 +600,6 @@ app.post('/api/pipeline/stream', async (req, res) => {
     send('error', { message: e.message });
     res.end();
   }
-});
-
-// ─── Debug: force reindex ────────────────────────────────────────────────────
-app.post('/api/meili-reindex', async (_req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT id,url,title,summary,content,tags,site_name,saved_at,category FROM articles WHERE ai_processed=1'
-    );
-    const docs = rows.map(toMeiliDoc);
-    const task = await articlesIndex.addDocuments(docs);
-    res.json({ ok: true, queued: docs.length, taskUid: task.taskUid });
-  } catch (e) {
-    res.status(500).json({ error: e.message, stack: e.stack });
-  }
-});
-
-// ─── Debug: Meilisearch status (temporary) ───────────────────────────────────
-app.get('/api/meili-debug', async (_req, res) => {
-  const out = { host: MEILI_HOST, hasKey: !!MEILI_KEY };
-  try {
-    out.health = await meili.health();
-  } catch (e) { out.healthErr = e.message; }
-  try {
-    out.stats = await articlesIndex.getStats();
-  } catch (e) { out.statsErr = e.message; }
-  try {
-    out.settings = await articlesIndex.getSettings();
-  } catch (e) { out.settingsErr = e.message; }
-  res.json(out);
 });
 
 // ─── Recent articles (Chrome extension idle list) ────────────────────────────
