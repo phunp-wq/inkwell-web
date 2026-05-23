@@ -281,7 +281,6 @@ async function setupMeilisearch() {
     searchableAttributes: [
       'title', 'title_nd',
       'summary', 'summary_nd',
-      'content', 'content_nd',
       'tags',
     ],
     filterableAttributes: ['category', 'tags', 'site_name'],
