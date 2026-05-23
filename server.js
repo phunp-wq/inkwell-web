@@ -47,18 +47,8 @@ function safeJson(str, fallback) {
   try { return JSON.parse(str); } catch (_) { return fallback; }
 }
 
-const JINA_REMOVE_SELECTORS = [
-  'nav', 'footer', 'header', 'aside',
-  '[class*="sidebar"]', '[class*="related"]',
-  '[class*="subscribe"]', '[class*="newsletter"]',
-  '[class*="comment"]', '[class*="discussion"]',
-  '[class*="top-post"]', '[class*="popular"]',
-  '.ads', '.advertisement', '.cookie-banner', '.cookie-notice',
-  '[class*="social-share"]', '[id*="disqus"]',
-  '.subscription-widget-wrap', '.post-footer', '.post-ufi',
-  '[data-testid="storyReadMore"]', '.pw-responses',
-].join(', ');
-
+// Substack reader/queue URLs yêu cầu login → resolve về canonical.
+// Special case duy nhất; mọi redirect khác Jina tự handle.
 async function resolveSubstackUrl(url) {
   try {
     const u = new URL(url);
@@ -84,24 +74,17 @@ async function extractViaJina(rawUrl) {
 
   const res = await fetch(`https://r.jina.ai/${url}`, {
     headers: {
-      'Authorization':     `Bearer ${JINA_API_KEY}`,
-      'Accept':            'application/json',
-      'X-Engine':          'browser',
-      'X-Return-Format':   'markdown',
-      'X-Respond-With':    'readerlm-v2',
-      'X-Target-Selector': 'article, main, [role="main"], .post-content, .entry-content, .article-content, .available-content',
-      'X-Remove-Selector': JINA_REMOVE_SELECTORS,
-      'X-Retain-Images':   'none',
-      'X-Timeout':         '30',
+      'Authorization': `Bearer ${JINA_API_KEY}`,
+      'Accept':        'application/json',
     },
-    signal: AbortSignal.timeout(35000),
+    signal: AbortSignal.timeout(60000),
   });
 
   if (!res.ok) throw new Error(`Jina ${res.status}`);
 
   const json    = await res.json();
-  const content = json.data?.content || json.content || '';
-  const title   = json.data?.title   || json.title   || '';
+  const data    = json.data || json;
+  const content = data.content || '';
 
   if (!content || content.split(/\s+/).length < 50) {
     throw new Error('Jina returned insufficient content');
@@ -109,9 +92,9 @@ async function extractViaJina(rawUrl) {
 
   return {
     content,
-    title:     title || new URL(url).hostname,
+    title:     data.title || new URL(url).hostname,
     siteName:  new URL(url).hostname,
-    byline:    json.data?.author || '',
+    byline:    data.author || '',
     wordCount: content.split(/\s+/).length,
     source:    'jina',
   };

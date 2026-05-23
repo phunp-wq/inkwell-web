@@ -2,8 +2,8 @@ import ReactMarkdown from 'react-markdown'
 import { useApp } from '../store/AppContext'
 import { CATEGORY_COLORS } from '../store/types'
 
-function formatDate(ts: number) {
-  return new Date(ts).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+function formatDate(ts: number | string) {
+  return new Date(Number(ts)).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 function readTime(wordCount: number) {

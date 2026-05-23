@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { Article, CATEGORY_COLORS } from '../store/types'
 import { useApp } from '../store/AppContext'
 
-function formatDate(ts: number) {
-  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+function formatDate(ts: number | string) {
+  return new Date(Number(ts)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 export default function ArticleList({ articles }: { articles: Article[] }) {
