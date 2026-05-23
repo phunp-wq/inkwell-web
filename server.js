@@ -13,7 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 3777;
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const AI_MODEL = 'openai/gpt-oss-120b:free';
+const AI_MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free';
 const JINA_API_KEY = process.env.JINA_API_KEY || '';
 
 // ─── PostgreSQL init ──────────────────────────────────────────────────────────
@@ -289,9 +289,8 @@ ${content.slice(0, 12000)}`;
       body: JSON.stringify({
         model: AI_MODEL,
         temperature: 0.2,
-        reasoning: { effort: 'low' },
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: `/no_think\n${systemPrompt}` },
           { role: 'user', content: userPrompt },
         ],
       }),
