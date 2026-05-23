@@ -275,6 +275,8 @@ async function waitForMeili(maxMs = 30000) {
 
 async function setupMeilisearch() {
   await waitForMeili();
+  // Ensure the index exists before settings/stats calls (creating is idempotent).
+  try { await meili.createIndex('articles', { primaryKey: 'id' }); } catch (_) {}
   await articlesIndex.updateSettings({
     searchableAttributes: [
       'title', 'title_nd',
@@ -592,6 +594,20 @@ app.post('/api/pipeline/stream', async (req, res) => {
     if (articleId) await pool.query('DELETE FROM articles WHERE id=$1', [articleId]);
     send('error', { message: e.message });
     res.end();
+  }
+});
+
+// ─── Debug: force reindex ────────────────────────────────────────────────────
+app.post('/api/meili-reindex', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id,url,title,summary,content,tags,site_name,saved_at,category FROM articles WHERE ai_processed=1'
+    );
+    const docs = rows.map(toMeiliDoc);
+    const task = await articlesIndex.addDocuments(docs);
+    res.json({ ok: true, queued: docs.length, taskUid: task.taskUid });
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack });
   }
 });
 
