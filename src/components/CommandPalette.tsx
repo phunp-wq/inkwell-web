@@ -190,6 +190,19 @@ export default function CommandPalette() {
                 </span>
               </div>
 
+              {(stage === 'connecting' || stage === 'reading' || stage === 'summarizing') && (
+                <div style={{
+                  height: 2, borderRadius: 1, marginBottom: 14,
+                  background: 'rgba(255,255,255,.05)', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: '25%', height: '100%',
+                    background: 'var(--primary)', borderRadius: 1,
+                    animation: 'progressSlide 1.2s cubic-bezier(.4,0,.6,1) infinite',
+                  }} />
+                </div>
+              )}
+
               {result && (
                 <div style={{ animation: 'fadeIn .2s ease' }}>
                   <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.01em', marginBottom: 8 }}>
