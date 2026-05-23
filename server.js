@@ -595,6 +595,21 @@ app.post('/api/pipeline/stream', async (req, res) => {
   }
 });
 
+// ─── Debug: Meilisearch status (temporary) ───────────────────────────────────
+app.get('/api/meili-debug', async (_req, res) => {
+  const out = { host: MEILI_HOST, hasKey: !!MEILI_KEY };
+  try {
+    out.health = await meili.health();
+  } catch (e) { out.healthErr = e.message; }
+  try {
+    out.stats = await articlesIndex.getStats();
+  } catch (e) { out.statsErr = e.message; }
+  try {
+    out.settings = await articlesIndex.getSettings();
+  } catch (e) { out.settingsErr = e.message; }
+  res.json(out);
+});
+
 // ─── Recent articles (Chrome extension idle list) ────────────────────────────
 app.get('/api/recent', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 3, 10);
