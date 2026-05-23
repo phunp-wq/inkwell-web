@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import logoSvg from '../assets/logo.svg'
 import { useApp } from '../store/AppContext'
 import { FilterView, CATEGORY_COLORS } from '../store/types'
 
@@ -36,11 +37,7 @@ export default function Sidebar() {
       {/* Brand */}
       <div style={{ padding: '28px 18px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg width="17" height="17" viewBox="0 0 12 12" fill="none">
-              <path d="M2 3h8M2 6h5M2 9h7" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </div>
+          <img src={logoSvg} width={32} height={32} style={{ borderRadius: 9, flexShrink: 0, display: 'block' }} alt="Inkwell" />
           <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-1)' }}>Inkwell</span>
         </div>
       </div>
