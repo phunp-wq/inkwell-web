@@ -12,6 +12,8 @@ interface AppState {
   searchQuery: string
   selectedArticle: Article | null
   paletteOpen: boolean
+  darkMode: boolean
+  toggleDark: () => void
   setViewMode: (v: ViewMode) => void
   setFilterView: (v: FilterView) => void
   setSearchQuery: (q: string) => void
@@ -35,6 +37,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('inkwell-theme')
+    return saved ? saved === 'dark' : true
+  })
+  const toggleDark = () => setDarkMode(d => !d)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
+    localStorage.setItem('inkwell-theme', darkMode ? 'dark' : 'light')
+  }, [darkMode])
 
   const refresh = useCallback(async () => {
     try {
@@ -107,6 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       articles, allArticles, loading, viewMode, filterView, searchQuery, selectedArticle, paletteOpen,
+      darkMode, toggleDark,
       setViewMode,
       setFilterView: (v: FilterView) => { setFilterView(v); setSelectedArticle(null) },
       setSearchQuery,

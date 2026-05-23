@@ -21,6 +21,38 @@
   --r-md: 6px;
   --r-lg: 8px;
   --r-xl: 12px;
+
+  --bg-subtle:   rgba(255,255,255,0.06);
+  --bg-tag:      rgba(255,255,255,0.05);
+  --bg-kbd:      rgba(255,255,255,0.05);
+  --bg-card-alt: rgba(255,255,255,0.04);
+  --bg-summary:  rgba(255,255,255,0.02);
+  --scrollbar:       rgba(255,255,255,0.08);
+  --scrollbar-hover: rgba(255,255,255,0.14);
+}
+
+[data-theme="light"] {
+  --bg-base:     #FAFAFA;
+  --bg-surface:  #F0F0F2;
+  --bg-elevated: #FFFFFF;
+  --bg-hover:    #E8E8EB;
+  --bg-active:   #DDDDE0;
+
+  --text-1: #18181B;
+  --text-2: #6B6B6F;
+  --text-3: #9C9CA0;
+
+  --border:       rgba(0,0,0,0.08);
+  --border-hover: rgba(0,0,0,0.14);
+  --border-focus: rgba(0,0,0,0.22);
+
+  --bg-subtle:   rgba(0,0,0,0.06);
+  --bg-tag:      rgba(0,0,0,0.05);
+  --bg-kbd:      rgba(0,0,0,0.05);
+  --bg-card-alt: rgba(0,0,0,0.03);
+  --bg-summary:  rgba(0,0,0,0.02);
+  --scrollbar:       rgba(0,0,0,0.08);
+  --scrollbar-hover: rgba(0,0,0,0.14);
 }
 
 html, body, #root {
@@ -53,8 +85,8 @@ a { color: inherit; text-decoration: none; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
@@ -107,11 +139,11 @@ a { color: inherit; text-decoration: none; }
   padding: 0.4em 1em; color: var(--text-2); font-style: italic;
 }
 .article-body code {
-  background: rgba(255,255,255,.07); padding: 2px 6px;
+  background: var(--bg-subtle); padding: 2px 6px;
   border-radius: 4px; font-size: .875em; font-family: ui-monospace, monospace;
 }
 .article-body pre {
-  background: rgba(255,255,255,.05); border: 1px solid var(--border);
+  background: var(--bg-tag); border: 1px solid var(--border);
   border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 1em 0;
 }
 .article-body pre code { background: none; padding: 0; font-size: .85em; }

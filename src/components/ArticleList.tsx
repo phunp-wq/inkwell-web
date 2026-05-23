@@ -59,7 +59,7 @@ function ArticleRow({ article }: { article: Article }) {
         {article.tags.slice(0, 2).map(tag => (
           <span key={tag} style={{
             fontSize: 10, color: 'var(--text-3)',
-            background: 'rgba(255,255,255,.04)', padding: '2px 6px', borderRadius: 3,
+            background: 'var(--bg-card-alt)', padding: '2px 6px', borderRadius: 3,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {tag}

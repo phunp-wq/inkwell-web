@@ -93,7 +93,7 @@ export default function ArticleDetail() {
 
         {/* Summary card */}
         <div style={{
-          background: 'rgba(255,255,255,.02)',
+          background: 'var(--bg-summary)',
           border: '1px solid var(--border)',
           borderRadius: 'var(--r-lg)',
           padding: '18px 20px', marginBottom: 28,
@@ -121,7 +121,7 @@ export default function ArticleDetail() {
               {a.tags.map(tag => (
                 <span key={tag} style={{
                   fontSize: 12, fontWeight: 500, color: 'var(--text-2)',
-                  background: 'rgba(255,255,255,.05)', padding: '4px 10px',
+                  background: 'var(--bg-tag)', padding: '4px 10px',
                   borderRadius: 'var(--r-md)',
                 }}>
                   {tag}

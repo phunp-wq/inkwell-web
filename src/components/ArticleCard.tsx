@@ -45,7 +45,7 @@ export default function ArticleCard({ article }: { article: Article }) {
       }}>
         <div style={{
           width: 36, height: 36, borderRadius: 10,
-          background: 'rgba(255,255,255,.04)',
+          background: 'var(--bg-card-alt)',
           border: `1px solid ${color}40`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 15, fontWeight: 600, color,
@@ -84,7 +84,7 @@ export default function ArticleCard({ article }: { article: Article }) {
             {article.tags.slice(0, 3).map(tag => (
               <span key={tag} style={{
                 fontSize: 11, fontWeight: 500, color: 'var(--text-2)',
-                background: 'rgba(255,255,255,.05)', padding: '3px 8px',
+                background: 'var(--bg-tag)', padding: '3px 8px',
                 borderRadius: 'var(--r-sm)', animation: 'tagPop .2s cubic-bezier(.3,.7,.4,1)',
               }}>
                 {tag}

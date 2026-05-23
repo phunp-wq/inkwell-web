@@ -4,7 +4,7 @@ import { useApp } from '../store/AppContext'
 import { FilterView, CATEGORY_COLORS } from '../store/types'
 
 export default function Sidebar() {
-  const { allArticles, filterView, setFilterView, setPaletteOpen } = useApp()
+  const { allArticles, filterView, setFilterView, setPaletteOpen, darkMode, toggleDark } = useApp()
   const [catOpen, setCatOpen] = useState(true)
   const [tagOpen, setTagOpen] = useState(true)
 
@@ -62,7 +62,7 @@ export default function Sidebar() {
             </svg>
             Add article
           </span>
-          <span style={{ fontSize: 11, background: 'rgba(255,255,255,.05)', padding: '2px 5px', borderRadius: 4, color: 'var(--text-3)' }}>⌘K</span>
+          <span style={{ fontSize: 11, background: 'var(--bg-kbd)', padding: '2px 5px', borderRadius: 4, color: 'var(--text-3)' }}>⌘K</span>
         </button>
       </div>
 
@@ -113,7 +113,7 @@ export default function Sidebar() {
                   width: '100%', display: 'flex', alignItems: 'center', gap: 8,
                   padding: '5px 10px 5px 26px', fontSize: 12, fontWeight: 500,
                   borderRadius: 'var(--r-md)', color: isActive({ type: 'category', value: cat }) ? 'var(--text-1)' : 'var(--text-2)',
-                  background: isActive({ type: 'category', value: cat }) ? 'rgba(255,255,255,.06)' : 'transparent',
+                  background: isActive({ type: 'category', value: cat }) ? 'var(--bg-subtle)' : 'transparent',
                   transition: 'all 100ms',
                 }}
                 onMouseEnter={e => { if (!isActive({ type: 'category', value: cat })) (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)' }}
@@ -159,7 +159,7 @@ export default function Sidebar() {
                     onClick={() => setFilterView({ type: 'tag', value: tag })}
                     style={{
                       fontSize: 11, fontWeight: 500, padding: '3px 8px', borderRadius: 'var(--r-sm)',
-                      background: isActive({ type: 'tag', value: tag }) ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.05)',
+                      background: isActive({ type: 'tag', value: tag }) ? 'var(--bg-subtle)' : 'var(--bg-tag)',
                       color: isActive({ type: 'tag', value: tag }) ? 'var(--text-1)' : 'var(--text-2)',
                       transition: 'all 100ms',
                     }}
@@ -175,10 +175,21 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div style={{ borderTop: '1px solid var(--border)', padding: 8 }}>
+        <NavItem label={darkMode ? 'Light Mode' : 'Dark Mode'} badge={darkMode ? 'DARK' : 'LIGHT'} active={false} onClick={toggleDark}>
+          {darkMode ? (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <circle cx="7" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3"/>
+              <path d="M7 2v1.2M7 10.8V12M2 7h1.2M10.8 7H12M3.8 3.8l.85.85M9.35 9.35l.85.85M10.2 3.8l-.85.85M4.65 9.35l-.85.85" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M11.81 8.05A4.81 4.81 0 015.95 2.19a4.81 4.81 0 105.86 5.86Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </NavItem>
         <NavItem label="Settings" active={false} onClick={() => {}}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="7" cy="7" r="2" stroke="currentColor" strokeWidth="1.3"/>
-            <path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M10.01 10.01l1.06 1.06M2.93 11.07l1.06-1.06M10.01 3.99l1.06-1.06" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+            <path fillRule="evenodd" clipRule="evenodd" d="M5.76 3.2L5.84 1.52L8.16 1.52L8.24 3.2L9.68 4.03L11.16 3.25L12.33 5.27L10.91 6.17L10.91 7.83L12.33 8.73L11.16 10.75L9.68 9.97L8.24 10.8L8.16 12.48L5.84 12.48L5.76 10.8L4.32 9.97L2.84 10.75L1.67 8.73L3.09 7.83L3.09 6.17L1.67 5.27L2.84 3.25L4.32 4.03ZM9.2 7A2.2 2.2 0 114.8 7A2.2 2.2 0 119.2 7Z"/>
           </svg>
         </NavItem>
       </div>
@@ -186,8 +197,8 @@ export default function Sidebar() {
   )
 }
 
-function NavItem({ label, count, active, onClick, children }: {
-  label: string; count?: number; active: boolean; onClick: () => void; children: React.ReactNode
+function NavItem({ label, count, badge, active, onClick, children }: {
+  label: string; count?: number; badge?: string; active: boolean; onClick: () => void; children: React.ReactNode
 }) {
   const [hovered, setHovered] = useState(false)
   return (
@@ -199,14 +210,17 @@ function NavItem({ label, count, active, onClick, children }: {
         width: '100%', display: 'flex', alignItems: 'center', gap: 10,
         padding: '7px 10px', fontSize: 13, fontWeight: 500,
         borderRadius: 'var(--r-md)', transition: 'all 100ms',
-        background: active ? 'rgba(255,255,255,.06)' : hovered ? 'var(--bg-hover)' : 'transparent',
+        background: active ? 'var(--bg-subtle)' : hovered ? 'var(--bg-hover)' : 'transparent',
         color: active ? 'var(--text-1)' : hovered ? 'var(--text-1)' : 'var(--text-2)',
       }}
     >
       <span style={{ color: active ? 'var(--primary)' : 'currentColor', display: 'flex' }}>{children}</span>
       {label}
+      {badge && (
+        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, background: 'var(--bg-kbd)', padding: '2px 5px', borderRadius: 3, color: 'var(--text-3)' }}>{badge}</span>
+      )}
       {count !== undefined && (
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)' }}>{count}</span>
+        <span style={{ marginLeft: badge ? 4 : 'auto', fontSize: 11, color: 'var(--text-3)' }}>{count}</span>
       )}
     </button>
   )

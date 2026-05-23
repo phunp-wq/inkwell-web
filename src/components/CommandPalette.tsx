@@ -135,13 +135,13 @@ export default function CommandPalette() {
           {query && (
             <button
               onClick={() => { setQuery(''); setStage('idle'); setResult(null) }}
-              style={{ fontSize: 11, color: 'var(--text-3)', background: 'rgba(255,255,255,.06)', padding: '3px 7px', borderRadius: 4 }}
+              style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--bg-kbd)', padding: '3px 7px', borderRadius: 4 }}
             >
               esc
             </button>
           )}
           {!query && (
-            <span style={{ fontSize: 11, color: 'var(--text-3)', background: 'rgba(255,255,255,.06)', padding: '3px 7px', borderRadius: 4 }}>esc</span>
+            <span style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--bg-kbd)', padding: '3px 7px', borderRadius: 4 }}>esc</span>
           )}
         </div>
 
@@ -171,7 +171,7 @@ export default function CommandPalette() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>Save article</div>
                 <div style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{query}</div>
               </div>
-              <span style={{ fontSize: 11, color: 'var(--text-3)', background: 'rgba(255,255,255,.06)', padding: '3px 8px', borderRadius: 4 }}>↵</span>
+              <span style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--bg-kbd)', padding: '3px 8px', borderRadius: 4 }}>↵</span>
             </button>
           )}
 
@@ -193,7 +193,7 @@ export default function CommandPalette() {
               {(stage === 'connecting' || stage === 'reading' || stage === 'summarizing') && (
                 <div style={{
                   height: 2, borderRadius: 1, marginBottom: 14,
-                  background: 'rgba(255,255,255,.05)', overflow: 'hidden',
+                  background: 'var(--bg-tag)', overflow: 'hidden',
                 }}>
                   <div style={{
                     width: '25%', height: '100%',
@@ -215,7 +215,7 @@ export default function CommandPalette() {
                     {result.ai?.tags?.map(tag => (
                       <span key={tag} style={{
                         fontSize: 11, fontWeight: 500, color: 'var(--text-2)',
-                        background: 'rgba(255,255,255,.06)', padding: '3px 8px', borderRadius: 'var(--r-sm)',
+                        background: 'var(--bg-kbd)', padding: '3px 8px', borderRadius: 'var(--r-sm)',
                         animation: 'tagPop .2s cubic-bezier(.3,.7,.4,1)',
                       }}>
                         {tag}
