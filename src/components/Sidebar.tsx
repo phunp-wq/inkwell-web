@@ -3,18 +3,18 @@ import { useApp } from '../store/AppContext'
 import { FilterView, CATEGORY_COLORS } from '../store/types'
 
 export default function Sidebar() {
-  const { articles, filterView, setFilterView, setPaletteOpen } = useApp()
+  const { allArticles, filterView, setFilterView, setPaletteOpen } = useApp()
   const [catOpen, setCatOpen] = useState(true)
   const [tagOpen, setTagOpen] = useState(true)
 
-  const allCount = articles.length
-  const favCount = articles.filter(a => a.favorite).length
+  const allCount = allArticles.length
+  const favCount = allArticles.filter(a => a.favorite).length
 
   const categoryCounts: Record<string, number> = {}
-  articles.forEach(a => { if (a.category) categoryCounts[a.category] = (categoryCounts[a.category] || 0) + 1 })
+  allArticles.forEach(a => { if (a.category) categoryCounts[a.category] = (categoryCounts[a.category] || 0) + 1 })
   const CATEGORIES = Object.keys(categoryCounts).sort()
 
-  const allTags = [...new Set(articles.flatMap(a => a.tags))].slice(0, 20)
+  const allTags = [...new Set(allArticles.flatMap(a => a.tags))].slice(0, 20)
 
   const isActive = (v: FilterView) => {
     if (typeof v === 'string' && typeof filterView === 'string') return v === filterView

@@ -5,6 +5,7 @@ const API = import.meta.env.VITE_API_BASE ?? 'http://localhost:3777'
 
 interface AppState {
   articles: Article[]
+  allArticles: Article[]
   loading: boolean
   viewMode: ViewMode
   filterView: FilterView
@@ -27,6 +28,7 @@ const AppContext = createContext<AppState | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [articles, setArticles] = useState<Article[]>([])
+  const [allArticles, setAllArticles] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [filterView, setFilterView] = useState<FilterView>('all')
@@ -57,6 +59,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { refresh() }, [refresh])
 
+  // Unfiltered list — drives Sidebar counts / categories / tags
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/articles`)
+        setAllArticles(await res.json())
+      } catch (e) { console.error('Failed to fetch all articles', e) }
+    })()
+  }, [])
+
   // ⌘K shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -73,7 +85,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toggleFavorite = async (id: string) => {
     const res = await fetch(`${API}/api/articles/${id}/favorite`, { method: 'POST' })
     const data = await res.json()
-    setArticles(prev => prev.map(a => a.id === id ? { ...a, favorite: data.favorite } : a))
+    const apply = (a: Article) => a.id === id ? { ...a, favorite: data.favorite } : a
+    setArticles(prev => prev.map(apply))
+    setAllArticles(prev => prev.map(apply))
     if (selectedArticle?.id === id) setSelectedArticle(prev => prev ? { ...prev, favorite: data.favorite } : null)
     if (filterView === 'favorites') await refresh()
   }
@@ -81,16 +95,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteArticle = async (id: string) => {
     await fetch(`${API}/api/articles/${id}`, { method: 'DELETE' })
     setArticles(prev => prev.filter(a => a.id !== id))
+    setAllArticles(prev => prev.filter(a => a.id !== id))
     if (selectedArticle?.id === id) setSelectedArticle(null)
   }
 
   const addArticle = (article: Article) => {
     setArticles(prev => [article, ...prev])
+    setAllArticles(prev => [article, ...prev])
   }
 
   return (
     <AppContext.Provider value={{
-      articles, loading, viewMode, filterView, searchQuery, selectedArticle, paletteOpen,
+      articles, allArticles, loading, viewMode, filterView, searchQuery, selectedArticle, paletteOpen,
       setViewMode,
       setFilterView: (v: FilterView) => { setFilterView(v); setSelectedArticle(null) },
       setSearchQuery,
